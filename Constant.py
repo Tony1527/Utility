@@ -20,9 +20,7 @@ g_TB=1024*g_GB
 
 g_A=1e-10           #Ångstrom
 g_nm=1e-9           #nm
-g_d=1.42*g_A        #meter (1.42 Ångstrom)
-g_v_F=1e6           #m/s    3dt/(2hbar)=0.9636e6, where t=2.97eV,d=1.42e-10
-g_t_perp=0.33*g_eV  #eV
+
 g_Pauli_0=np.eye(2,dtype=complex)
 g_Pauli_x=np.array([[0,1],\
                     [1,0]],dtype=complex)
