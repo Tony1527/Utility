@@ -135,3 +135,4 @@ output/
 *.jpg
 *.txt
 *.log
+.DS_Store
