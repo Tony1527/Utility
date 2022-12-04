@@ -16,6 +16,7 @@ g_KB=1024
 g_MB=1024*g_KB
 g_GB=1024*g_MB
 g_TB=1024*g_GB
+g_wn_cm=g_h*g_c0*1e2 #Energy-wavenumber (cm^-1)
 
 
 g_A=1e-10           #Ångstrom

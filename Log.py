@@ -18,7 +18,7 @@ _log_full_print = False
 
 
 def SplitDirFile(s):
-    dir_end = s.rfind("/")
+    dir_end = s.rfind(os.sep)
     if dir_end != -1:
         return s[:dir_end], s[dir_end + 1 :]
     else:
@@ -35,7 +35,7 @@ def MKDirsToFile(s):
 
 
 def MKOutput(path="."):
-    path = path + "/output/"
+    path = path + os.sep + "output" + os.sep
     return MKDirsToFile(path)
 
 
@@ -85,7 +85,7 @@ def Debug(s):
     sys.stderr.flush()
 
 
-def Info(s):
+def Info(s=""):
     if _log_full_print:
         s = GetProcInfo() + str(s)
     else:

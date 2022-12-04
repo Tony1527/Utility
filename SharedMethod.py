@@ -2,20 +2,195 @@ import os
 import numpy as np
 import pandas as pd
 from multiprocessing import Pool
+import matplotlib.pyplot as plt
+import matplotlib.colors as clrs
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+from matplotlib.ticker import MultipleLocator
+from matplotlib.backends.backend_pdf import PdfPages
+import pickle
+import copy
+from bisect import bisect_left, bisect_right
+
+plt.rcParams["font.sans-serif"] = "Times"
+plt.rcParams["mathtext.fontset"] = "stix"
+plt.rcParams["backend"] = "Qt5Agg"
+
+
 from Utility.Log import *
 from Utility.Constant import *
+from Utility.MathUtil import *
 
 
-def PDRead(file_name):
+
+def SavePDF(file_name, figure):
+    file_name = file_name + ".pdf"
+    MKDirsToFile(file_name)
+    with PdfPages(file_name) as pdf:
+        pdf.savefig(figure)
+        # pdf.savefig(figure, bbox_inches="tight")
+
+
+def SaveSVG(file_name, figure):
+    file_name = file_name + ".eps"
+    MKDirsToFile(file_name)
+    figure.savefig(file_name, format="eps", dpi=300)
+
+
+def ZPlot(
+    f,
+    space,
+    f_param=dict(),
+    plx=100,
+    is_log=False,
+    x_normalization=1,
+    y_normalization=1,
+    z_normalization=1,
+    is_show=True,
+    xlabel=r"$Re$",
+    ylabel=r"$Im$",
+    figsize=(13, 5),
+    is_fig_equal=True,
+    is_one_by_one=False,
+    is_save=True,
+):
+    rl_max = space[1].real
+    im_max = space[1].imag
+    rl_min = space[0].real
+    im_min = space[0].imag
+
+    X, Y = np.meshgrid(
+        np.linspace(rl_min, rl_max, plx), np.linspace(im_min, im_max, plx)
+    )
+    phase_colors = [
+        "navy",
+        "blue",
+        "blueviolet",
+        "purple",
+        "red",
+        "yellow",
+        "green",
+        "aqua",
+        "navy",
+    ]
+    mag_colors = ["black", "grey", "white"]
+    mag_colormap = clrs.LinearSegmentedColormap.from_list("MagClrsMapping", mag_colors)
+    phase_colormap = clrs.LinearSegmentedColormap.from_list(
+        "PhaseClrsMapping", phase_colors
+    )
+
+    Z = X + 1j * Y
+
+    # begin=time.time()
+
+    if is_one_by_one:
+        ret_values = np.vectorize(ZFunc)(Z, f, **f_param) / z_normalization
+    else:
+        ret_values = ZFunc(Z, f, **f_param) / z_normalization
+
+    # end=time.time()
+    # print("Total Time consuming %fs"%(end-begin))
+
+
+    M = np.abs(ret_values)
+    P = np.angle(ret_values)
+
+    fig, (ax1, ax2) = plt.subplots(1, 2)
+    fig.set_size_inches(figsize[0], figsize[1])
+
+    if is_log:
+        M = np.log10(M)
+        ax1.set_title("Magnitude(Log10)", fontsize=20)
+    else:
+        ax1.set_title("Magnitude", fontsize=20)
+    ax2.set_title("Phase", fontsize=20)
+
+    ax1_loc = make_axes_locatable(ax1)
+    ax2_loc = make_axes_locatable(ax2)
+    ax1_cax = ax1_loc.append_axes("right", size="5%", pad=0.05)
+    ax2_cax = ax2_loc.append_axes("right", size="5%", pad=0.05)
+
+    # ax2=plt.subplot()
+    ax1.set_xlabel(xlabel, fontsize=18)
+    ax1.set_ylabel(ylabel, fontsize=18)
+    ax2.set_xlabel(xlabel, fontsize=18)
+    ax2.set_ylabel(ylabel, fontsize=18)
+    ax1.set_xlim(rl_min / x_normalization, rl_max / x_normalization)
+    ax1.set_ylim(im_min / y_normalization, im_max / y_normalization)
+    ax2.set_xlim(rl_min / x_normalization, rl_max / x_normalization)
+    ax2.set_ylim(im_min / y_normalization, im_max / y_normalization)
+
+    pc1 = ax1.pcolor(X / x_normalization, Y / y_normalization, M, cmap=mag_colormap)
+    pc2 = ax2.pcolor(
+        X / x_normalization,
+        Y / y_normalization,
+        P,
+        cmap=phase_colormap,
+        vmin=-np.pi,
+        vmax=np.pi,
+    )
+
+    ax1_clb = fig.colorbar(pc1, cax=ax1_cax, orientation="vertical")
+    ax2_clb = fig.colorbar(pc2, cax=ax2_cax, orientation="vertical")
+
+    ax2_clb.ax.set_ylim([-pi, pi])
+    ax2_clb.ax.yaxis.set_ticks([-pi, 0, pi])
+    ax2_clb.ax.yaxis.set_ticklabels(["-π", "0", "π"])
+
+    if is_fig_equal:
+        ax1.set_aspect("equal")
+        ax2.set_aspect("equal")
+
+    if is_show == True:
+        plt.show()
+
+    if is_save:
+        SavePDF("output" + os.sep + "ZPlot", fig)
+
+    return fig, (ax1, ax2)
+
+
+
+
+def PDRead(file_name, *arg, **kwargs):
+    '''read data of "csv" or "xls" etc. form.
+
+    Parameters
+    ----------
+    file_name : string
+        file name
+
+    Returns
+    -------
+    DataFrame
+        DataFrame form
+    '''
     format = file_name.split(".")[-1]
     if format == "csv":
-        return pd.read_csv(file_name)
+        return pd.read_csv(file_name, *arg, **kwargs)
     elif format in ["xls", "xlsx", "xlsm", "xlsb", "odf", "ods", "odt"]:
-        return pd.read_excel(file_name)
+        return pd.read_excel(file_name, *arg, **kwargs)
+    else:
+        raise ValueError("Unknown format caught!")
+
+def PDSave(T,file_name,*arg,**kwargs):
+    format = file_name.split(".")[-1]
+    MKDirsToFile(file_name)
+    if format == "csv":
+        T.to_csv(file_name,*arg,**kwargs)
+    else:
+        writer = pd.ExcelWriter(file_name)
+        T.to_excel(writer,*arg,**kwargs)
+        writer.close()
 
 
 def IsIterable(obj):
     if hasattr(obj, "__iter__"):
+        return True
+    else:
+        return False
+
+def IsFunction(obj):
+    if hasattr(obj, "__call__"):
         return True
     else:
         return False
@@ -118,9 +293,65 @@ def MultiOperObj(p_list, *arg, **kwargs):
     return rtn
 
 
-def MultiprocTask(p_list, func, process_num=2, is_self_unzip=True, *arg, **kwargs):
+# def WarpFunc(func,*arg, **kwargs):
+#     def warp_func_0(p, *arg, **kwargs):
+#         return func(p)
+#     def warp_func_1(p, *arg, **kwargs):
+#         return func(p, *arg)
+#     def warp_func_2(p, *arg, **kwargs):
+#         return func(p, **kwargs)
+#     def warp_func_3(p, *arg, **kwargs):
+#         return func(p, *arg, **kwargs)
+#     if len(arg)==0:
+#         if len(kwargs)==0:
+#             return 
+#         else:
+#             return warp_func_2
+#     elif len(kwargs)==0:
+
+
+
+
+def MultiprocTask(p_list, func, process_num=2, is_self_unzip=True, is_param_form=True, *arg, **kwargs):
+    '''tackling tasks with multiprocess method
+
+    Parameters
+    ----------
+    p_list : list
+        input parameter list
+    func : function
+        function
+    process_num : int, >=1
+        process number
+    is_self_unzip : bool, optional
+        True: setting for function MultiOperObj.
+        False: setting for usual case.
+    is_param_form : bool, optional
+        True: p should have take (x1, x2, x3, ...), [x1, x2, x3, ...], or x1 form.
+        False: This function will help you to wrap the p_list in above form.
+
+    Returns
+    -------
+    list
+        Output
+
+    Raises
+    ------
+    ValueError
+        unknown g_ss_run_mode value
+    '''
+
+    def warp_plist(p_list):
+        k_list=[]
+        for p in p_list:
+            k_list.append([p])
+        return k_list
+
     begin = time.time()
     rtn = []
+
+    if is_param_form==False:
+        p_list=warp_plist(p_list)
 
     if g_ss_run_mode == "Release" and process_num > 1:
 
@@ -136,7 +367,8 @@ def MultiprocTask(p_list, func, process_num=2, is_self_unzip=True, *arg, **kwarg
                 res_l.append(res)
             else:
                 for p in job:
-                    if IsIterable(job):
+                    # p should take (x1, x2, x3, ...) or [x1, x2, x3, ...] form
+                    if IsIterable(p):
                         res = pool.apply_async(func, (*p, *arg), kwargs)
                     else:
                         res = pool.apply_async(func, (p, *arg), kwargs)
@@ -146,18 +378,29 @@ def MultiprocTask(p_list, func, process_num=2, is_self_unzip=True, *arg, **kwarg
 
         for res in res_l:
             v = res.get()
-            rtn.extend(v)
+            if IsIterable(v):
+                rtn.extend(v)
+            else:
+                rtn.append(v)
+            
     elif g_ss_run_mode == "Debug" or process_num <= 1:
         if is_self_unzip:
             res = func(p_list, *arg, **kwargs)
-            rtn.extend(res)
+            if IsIterable(res):
+                rtn.extend(res)
+            else:
+                rtn.append(res)
         else:
             for p in p_list:
+                # p should take (x1, x2, x3, ...), [x1, x2, x3, ...], or x1 form
                 if IsIterable(p):
                     res = func(*p, *arg, **kwargs)
                 else:
                     res = func(p, *arg, **kwargs)
-                rtn.extend(res)
+                if IsIterable(res):
+                    rtn.extend(res)
+                else:
+                    rtn.append(res)
     else:
         raise ValueError("unknown g_ss_run_mode value.")
 
@@ -177,3 +420,538 @@ def GetNodeProcNum():
     else:
         process_num = os.cpu_count()
     return process_num
+
+
+
+# def MultiprocGetZList(q_list, GetZList, is_multiproc=False):
+#     """
+#     calculate a list of z in 3D
+#     """
+
+#     z_list = []
+#     if is_multiproc:
+#         # Multiprocessing
+#         # print("Applying multi-processing to get z list")
+#         rtn = MultiprocTask(q_list, GetZList)
+#         z_list = rtn
+#     else:
+#         # Single processing
+#         # print("Applying single processing to get z list")
+#         for i in range(len(q_list)):
+#             l = GetZList(q_list[i])
+#             z_list.append(l)
+#     return z_list
+
+def SetXYTicks(ax, labelsize, *arg, **kwargs):
+    is_yticks_set = False
+    is_xticks_set = False
+    if kwargs.get("ytick_num") != None:
+        yticks_num = kwargs["ytick_num"]
+        if yticks_num != 0:
+            ylim = kwargs["ylim"]
+            ax.set_yticks(np.linspace(ylim[0], ylim[1], yticks_num))
+            is_yticks_set = True
+    if kwargs.get("yticks_step") != None:
+        yticks_step = kwargs["yticks_step"]
+        if yticks_step != 0:
+            if is_yticks_set:
+                raise ValueError("yticks has been set")
+            ylim = kwargs["ylim"]
+            yticks_num = int((ylim[1] - ylim[0]) / yticks_step) + 1
+            ax.set_yticks(np.linspace(ylim[0], ylim[1], yticks_num))
+            is_yticks_set = True
+
+    if kwargs.get("xtick_num") != None:
+        xticks_num = kwargs["xtick_num"]
+        if xticks_num != 0:
+            xlim = kwargs["xlim"]
+            ax.set_xticks(np.linspace(xlim[0], xlim[1], xticks_num))
+            is_xticks_set = True
+
+    if kwargs.get("xticks_step") != None:
+        xticks_step = kwargs["xticks_step"]
+        if xticks_step != 0:
+            if is_xticks_set:
+                raise ValueError("xticks has been set")
+            xlim = kwargs["xlim"]
+            xticks_num = int((xlim[1] - xlim[0]) / xticks_step) + 1
+            ax.set_xticks(np.linspace(xlim[0], xlim[1], xticks_num))
+            is_xticks_set = True
+
+    if kwargs.get("xticks") != None:
+        xticks = kwargs.get("xticks")
+        if len(xticks) != 0:
+            ax.set_xticks(xticks)
+
+        if kwargs.get("xtick_names") != None:
+            if is_xticks_set:
+                raise ValueError("xticks has been set")
+            points_names = kwargs["xtick_names"]
+            if len(points_names) != 0:
+                font_size = kwargs["fontsize"]
+                ax.set_xticklabels(points_names, fontsize=font_size)
+                is_xticks_set = True
+
+    ax.tick_params(labelsize=labelsize)
+
+
+def NormalizeArray(V, v_normalization):
+    V_normalized = copy.deepcopy(V)
+    min_v=max_v=range_v=None
+
+    if v_normalization==0:
+        min_v = np.min(V_normalized)
+        max_v = np.max(V_normalized)
+        range_v = np.linalg.norm(max_v-min_v)
+
+    if isinstance(V,np.ndarray):
+        if v_normalization==0:    
+                V_normalized-=min_v
+                V_normalized/=range_v
+        else:
+            V_normalized /= v_normalization
+    else:
+        for m in range(len(V_normalized)):
+            if v_normalization==0:    
+                V_normalized[m]-=min_v
+                V_normalized[m]/=range_v
+            else:
+                V_normalized[m] /= v_normalization
+    return V_normalized
+
+def CalculateXY(
+    x_list,
+    get_y_List,
+    base_num=100,
+    is_save=False,
+    title="",
+    f_param={},
+    is_one_by_one=False,
+):
+
+    X = np.linspace(x_list[0], x_list[1], base_num)
+
+    if len(f_param) == 0:
+        if is_one_by_one:
+            Y = np.vectorize(get_y_List)(X)
+        else:
+            Y = get_y_List(X)
+    else:
+        if is_one_by_one:
+            Y = np.vectorize(get_y_List)(X, **f_param)
+        else:
+            Y = get_y_List(X, **f_param)
+
+
+    
+    
+
+    if is_save:
+        name = title
+        save_data = {"name": name, "X": X, "Y": Y}
+        MKOutput()
+        with open("output/" + name + ".pickle", "wb") as f:
+            pickle.dump(save_data, f)
+
+    return X, Y
+
+
+def PlotXY(
+    x_list,
+    get_y_List,
+    base_num=100,
+    xlabel="$X$",
+    ylabel="$Y$",
+    title="X-Y Plot",
+    legend=None,
+    xlim=None,
+    ylim=None,
+    yticks_num=0,
+    xticks_num=0,
+    label_sz=16,
+    font_sz=16,
+    line_w=2,
+    style="line",
+    is_save=False,
+    y_normalization=1,
+    x_normalization=1,
+    axes=None,
+    f_param={},
+    is_one_by_one=False,
+    is_show=True,
+    *arg,
+    **kwargs
+):
+
+    if IsFunction(get_y_List):
+        if base_num <= 1:
+            base_num = 2
+        X, Y = CalculateXY(
+            x_list,
+            get_y_List,
+            base_num,
+            is_save,
+            title,
+            f_param,
+            is_one_by_one,
+        )
+        X=NormalizeArray(np.array(X),x_normalization)
+        Y=NormalizeArray(np.array(Y),y_normalization)
+    else:
+        X=NormalizeArray(np.array(x_list),x_normalization)
+        Y=NormalizeArray(np.array(get_y_List),y_normalization)
+    
+
+    ##start drawing picture##
+
+    ax = axes
+
+    if ax == None:
+        # plt.figure()
+        ax = plt.axes()
+        ax.tick_params(labelsize=label_sz)
+        ax.set_xlabel(xlabel, fontsize=font_sz)
+        ax.set_ylabel(ylabel, fontsize=font_sz)
+
+        if xlim != None:
+            ax.set_xlim(xlim)
+            if xticks_num != 0:
+                ax.set_xticks(np.linspace(xlim[0], xlim[1], xticks_num))
+        if ylim != None:
+            ax.set_ylim(ylim)
+            if yticks_num != 0:
+                ax.set_yticks(np.linspace(ylim[0], ylim[1], yticks_num))
+
+        ax.set_title(title, fontsize=font_sz + 2)
+    else:
+        pass
+
+    XYFigPlot(ax, style, X, Y, lw=line_w,label=legend,*arg,**kwargs)
+    if is_show == True:
+        if legend!=None:
+            handles, labels = ax.get_legend_handles_labels()
+            ax.legend(handles, labels)
+        plt.show()
+    return ax
+
+def ReplaceYParam(y):
+    def decorator(func):
+        def wrapper(*args,**kwargs):
+            kwargs.update({y:kwargs["_y"]})
+            kwargs.pop("_y")
+            return func(*args,**kwargs)
+        return wrapper
+    return decorator
+
+def PlotMultiLines(
+    x_list,
+    y_list,
+    get_z_list,
+    base_num_x=100,
+    base_num_y=100,
+    x_normalization=1,
+    y_normalization=1,
+    z_normalization=0,
+    shift=1,
+    xlabel="${x}$",
+    zlabel="${z}$",
+    unit_y=None,
+    title="$X-Z(Y)$",
+    xlim=None,
+    zlim=None,
+    yticks_num=0,
+    xticks_num=0,
+    label_sz=17,
+    axes=None,
+    style="line",
+    f_param={},
+    is_one_by_one=False,
+    is_save=False,
+    is_show=True,
+    is_multiproc=False,
+    **kwargs
+):
+    if base_num_y!=0:
+        Y = np.linspace(y_list[0],y_list[1],base_num_y)
+    else:
+        Y=y_list
+        base_num_y = y_list
+    Z_list=[]
+    ax = axes
+    
+    offset=0
+    for i,y in enumerate(Y):
+        
+        f_param.update({"_y":y})
+        
+        if IsFunction(get_z_list):
+            X,Z=CalculateXY(x_list,get_z_list,base_num=base_num_x,is_save=False,
+                            f_param=f_param,is_one_by_one=is_one_by_one)
+
+            Z_list.append(Z)
+            X=NormalizeArray(np.array(X),x_normalization)
+            Z=NormalizeArray(np.array(Z),z_normalization)
+        else:
+            Z_list.append(get_z_list[i])
+            X=NormalizeArray(np.array(x_list),x_normalization)
+            Z=NormalizeArray(np.array(get_z_list[i]),z_normalization)
+
+        legend_y=None
+        if i==0 and unit_y!=None:
+            legend_y="Bottom: "+str(y/y_normalization)+unit_y
+        elif i==len(Y)-1 and unit_y!=None:
+            legend_y="Top: "+str(y/y_normalization)+unit_y
+
+        if z_normalization==0:
+            Z+=offset
+            ax = PlotXY(X,Z,base_num=0,xlabel=xlabel,ylabel=zlabel,title=title,xlim=xlim,ylim=(0-0.1,(base_num_y+1)*shift+0.1),
+            label_sz=label_sz,axes=ax,is_save=is_save,is_show=False,style=style,xticks_num=xticks_num,yticks_num=yticks_num,legend=legend_y)
+            offset+=shift
+        else:
+            ax = PlotXY(X,Z/z_normalization,base_num=0,xlabel=xlabel,ylabel=zlabel,title=title,xlim=xlim,ylim=zlim,
+            label_sz=label_sz,axes=ax,is_save=is_save,is_show=False,style=style,xticks_num=xticks_num,yticks_num=yticks_num,legend=legend_y)
+
+        
+
+    if is_save:
+        MKOutput()
+        name = title
+        save_data = {"name": name, "X": X, "Y": Y, "Z_list": Z_list}
+        with open("output" + os.sep + name + ".pickle", "wb") as f:
+            pickle.dump(save_data, f)
+
+    
+    if is_show:
+        handles, labels = ax.get_legend_handles_labels()
+        ax.legend(handles, labels)
+        plt.show()
+    return ax
+
+
+def XYFigPlot(ax, style, X, Y, *arg, **kwargs):
+    if style == "line":
+        ax.plot(X, Y, *arg, **kwargs)
+    elif style == "scatter":
+        ax.scatter(X, Y, marker="o", c="grey", *arg, **kwargs)
+    elif style == "black_scatter":
+        ax.scatter(X, Y, marker="o", c="black", *arg, **kwargs)
+    elif style == "blue_scatter":
+        ax.scatter(X, Y, marker="o", c="blue", *arg, **kwargs)
+    elif style == "red_scatter":
+        ax.scatter(X, Y, marker="o", c="red", *arg, **kwargs)
+    elif style == "blue_line":
+        ax.plot(X, Y, c="blue", *arg, **kwargs)
+    elif style == "red_line":
+        ax.plot(X, Y, c="red", *arg, **kwargs)
+    elif style == "black_line":
+        ax.plot(X, Y, c="black", *arg, **kwargs)
+    elif style == "dash_black_line":
+        ax.plot(X, Y, c="black", linestyle="--")
+    elif style == "blue_bar":
+        ax.bar(X, Y, color="mediumblue", *arg, **kwargs)
+    else:
+        raise ValueError("unknown style.")
+
+
+def Calculate3D(
+    x_list,
+    y_list,
+    GetZList,
+    base_num=100,
+    is_save=False,
+    model="",
+    is_multiproc=False
+):
+
+    X, Y = np.meshgrid(
+        np.linspace(x_list[0], x_list[1], base_num),
+        np.linspace(y_list[0], y_list[1], base_num),
+    )
+    p_list = np.concatenate(
+        (X.reshape(base_num * base_num, 1), Y.reshape(base_num * base_num, 1)), axis=1
+    )
+
+    if is_multiproc:
+        z_list = MultiprocTask(p_list, GetZList,is_self_unzip=False,is_param_form=False)
+    else:
+        z_list = MultiprocTask(p_list, GetZList,1,is_self_unzip=False,is_param_form=False)
+
+    # z_list = MultiprocGetZList(p_list, GetZList, is_multiproc)
+    Z = np.array(z_list)
+
+
+    Z = Z.reshape(base_num, base_num)
+
+    if is_save:
+        MKOutput()
+        name = "Z_of_" + model
+        save_data = {"name": name, "X": X, "Y": Y, "Z_list": Z}
+        with open("output" + os.sep + name + ".pickle", "wb") as f:
+            pickle.dump(save_data, f)
+
+    return Z, X, Y
+
+
+def Plot3D(
+    x_list,
+    y_list,
+    get_z_list,
+    base_num=100,
+    xlabel="${x}$",
+    ylabel="${y}$",
+    zlabel="${E(x)}$(?eV)",
+    title="$E(\mathbf{k})$",
+    xlim=None,
+    ylim=None,
+    yticks_num=0,
+    tick_sz=15,
+    label_sz=17,
+    style="pcolor",
+    is_save=False,
+    model="",
+    x_normalization=1,
+    y_normalization=1,
+    z_normalization=1,
+    axes=None,
+    is_show=True,
+    is_multiproc=False,
+    yticks_step=0,
+    xticks=[],
+    xtick_names=[],
+    figsize=(8, 8),
+    **kwargs
+):
+    """
+    plot 3D picture of z vs x-y
+    """
+
+    if IsFunction(get_z_list):
+        if base_num <= 1:
+            base_num = 2
+        Z, X, Y = Calculate3D(
+            x_list,
+            y_list,
+            get_z_list,
+            base_num,
+            is_save=is_save,
+            model=model,
+            is_multiproc=is_multiproc
+        )
+
+        X=NormalizeArray(np.array(X),x_normalization)
+        Y=NormalizeArray(np.array(Y),y_normalization)
+        Z=NormalizeArray(np.array(Z),z_normalization)
+    else:
+        X=NormalizeArray(np.array(x_list),x_normalization)
+        Y=NormalizeArray(np.array(y_list),y_normalization)
+        Z=NormalizeArray(np.array(get_z_list),z_normalization)
+
+    ##start drawing picture##
+
+    if axes == None:
+
+        if style == "surface" or style == "scatter":
+            if style=="surface":
+                fig = plt.figure(
+                    figsize=figsize
+                )
+            elif style == "scatter":
+                fig = plt.figure(
+                    figsize=figsize, bbox_inches="tight", pad_inches=5
+                )  # (8,6)
+            ax = plt.axes(projection="3d")
+
+            ax.set_zlabel(zlabel, fontsize=label_sz, labelpad=20)
+            ax.zaxis.set_tick_params(pad=10)
+        else:
+            fig = plt.figure(figsize=figsize)
+            # fig=plt.figure(figsize=(6,6),dpi=600)
+            ax = plt.axes()
+
+        # ax.tick_params(labelsize=tick_sz)
+        ax.set_xlabel(xlabel, fontsize=label_sz, labelpad=13)
+        ax.set_ylabel(ylabel, fontsize=label_sz, labelpad=13)
+
+        ax.xaxis.set_tick_params(pad=8)
+        ax.yaxis.set_tick_params(pad=8)
+
+        if xlim != None:
+            ax.set_xlim(xlim)
+        if ylim != None:
+            ax.set_ylim(ylim)
+
+        ax.set_title(title, fontsize=label_sz + 4)
+
+        SetXYTicks(
+            ax,
+            labelsize=tick_sz,
+            ylim=ylim,
+            yticks_num=yticks_num,
+            xtick_names=xtick_names,
+            xticks=xticks,
+            fontsize=label_sz,
+            yticks_step=yticks_step,
+        )
+
+    z_colors = ["#3050C0", "white", "firebrick"]
+    # z_colors = ["black", "grey", "white"]
+    z_colormap = clrs.LinearSegmentedColormap.from_list("ZClrsMapping", z_colors)
+    if style == "surface":
+        # ax.plot_surface(X,Y,Z,cmap='rainbow',rcount=100)
+        ax.plot_surface(X, Y, Z, cmap=z_colormap, rcount=100)
+        if kwargs.get("azim") != None and kwargs.get("elev") != None:
+            ax.view_init(elev=kwargs["elev"], azim=kwargs["azim"])
+    elif style == "pcolor":
+
+        # pc=ax.pcolor(X,Y,Z,cmap=cm.coolwarm)
+        pc = ax.pcolor(X, Y, Z, cmap=z_colormap)
+
+        ax_loc = make_axes_locatable(ax)
+        ax_cax = ax_loc.append_axes("right", size="5%", pad=0.05)
+        ax_clb = fig.colorbar(pc, cax=ax_cax, orientation="vertical")
+        # ax.set_aspect("equal",adjustable='box')
+    elif style == "scatter":
+        pc = ax.scatter(X, Y, Z, c="black")
+
+    plt.tight_layout()
+    if is_show:
+        plt.show()
+    if is_save:
+        SavePDF("output" + os.sep + title.replace(os.sep, "_"), fig)
+    return ax
+
+
+def Index(a, x):
+    'Locate the leftmost value exactly equal to x'
+    i = bisect_left(a, x)
+    if i != len(a) and a[i] == x:
+        return i
+    raise ValueError
+
+def FindLT(a, x):
+    'Find rightmost value less than x'
+    i = bisect_left(a, x)
+    if i:
+        return a[i-1],i-1
+    raise ValueError
+
+def FindLE(a, x):
+    'Find rightmost value less than or equal to x'
+    i = bisect_right(a, x)
+    if i:
+        return a[i-1],i-1
+    raise ValueError
+
+def FindGT(a, x):
+    'Find leftmost value greater than x'
+    i = bisect_right(a, x)
+    if i != len(a):
+        return a[i],i
+    raise ValueError
+
+def FindGE(a, x):
+    'Find leftmost item greater than or equal to x'
+    i = bisect_left(a, x)
+    if i != len(a):
+        return a[i],i
+    raise ValueError
