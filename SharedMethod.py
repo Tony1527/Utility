@@ -521,10 +521,10 @@ def NormalizeArray(V, v_normalization):
 
 def CalculateXY(
     x_list,
-    get_y_List,
+    get_y_list,
     base_num=100,
     is_save=False,
-    title="",
+    file_name="Y-X",
     f_param={},
     is_one_by_one=False,
 ):
@@ -533,32 +533,28 @@ def CalculateXY(
 
     if len(f_param) == 0:
         if is_one_by_one:
-            Y = np.vectorize(get_y_List)(X)
+            Y = np.vectorize(get_y_list)(X)
         else:
-            Y = get_y_List(X)
+            Y = get_y_list(X)
     else:
         if is_one_by_one:
-            Y = np.vectorize(get_y_List)(X, **f_param)
+            Y = np.vectorize(get_y_list)(X, **f_param)
         else:
-            Y = get_y_List(X, **f_param)
+            Y = get_y_list(X, **f_param)
 
 
     
     
 
     if is_save:
-        name = title
-        save_data = {"name": name, "X": X, "Y": Y}
-        MKOutput()
-        with open("output/" + name + ".pickle", "wb") as f:
-            pickle.dump(save_data, f)
+        Save(file_name,{"X": X, "Y": Y})
 
     return X, Y
 
 
 def PlotXY(
     x_list,
-    get_y_List,
+    get_y_list,
     base_num=100,
     xlabel="$X$",
     ylabel="$Y$",
@@ -583,12 +579,12 @@ def PlotXY(
     **kwargs
 ):
 
-    if IsFunction(get_y_List):
+    if IsFunction(get_y_list):
         if base_num <= 1:
             base_num = 2
         X, Y = CalculateXY(
             x_list,
-            get_y_List,
+            get_y_list,
             base_num,
             is_save,
             title,
@@ -598,8 +594,10 @@ def PlotXY(
         X=NormalizeArray(np.array(X),x_normalization)
         Y=NormalizeArray(np.array(Y),y_normalization)
     else:
+        if is_save:
+            Save(title,{"X": x_list, "Y": get_y_list})
         X=NormalizeArray(np.array(x_list),x_normalization)
-        Y=NormalizeArray(np.array(get_y_List),y_normalization)
+        Y=NormalizeArray(np.array(get_y_list),y_normalization)
     
 
     ##start drawing picture##
@@ -714,12 +712,7 @@ def PlotMultiLines(
         
 
     if is_save:
-        MKOutput()
-        name = title
-        save_data = {"name": name, "X": X, "Y": Y, "Z_list": Z_list}
-        with open("output" + os.sep + name + ".pickle", "wb") as f:
-            pickle.dump(save_data, f)
-
+        Save(title,{"X":X,"Y":Y,"Z_list":Z_list})
     
     if is_show:
         handles, labels = ax.get_legend_handles_labels()
@@ -752,6 +745,10 @@ def XYFigPlot(ax, style, X, Y, *arg, **kwargs):
     else:
         raise ValueError("unknown style.")
 
+def Save(file_name,data):
+    MKOutput()
+    with open("output" + os.sep + file_name + ".pickle", "wb") as f:
+        pickle.dump(data, f)
 
 def Calculate3D(
     x_list,
@@ -759,7 +756,7 @@ def Calculate3D(
     GetZList,
     base_num=100,
     is_save=False,
-    model="",
+    file_name="Z-XY",
     is_multiproc=False
 ):
 
@@ -783,11 +780,7 @@ def Calculate3D(
     Z = Z.reshape(base_num, base_num)
 
     if is_save:
-        MKOutput()
-        name = "Z_of_" + model
-        save_data = {"name": name, "X": X, "Y": Y, "Z_list": Z}
-        with open("output" + os.sep + name + ".pickle", "wb") as f:
-            pickle.dump(save_data, f)
+        Save(file_name,{"X": X, "Y": Y, "Z_list": Z})
 
     return Z, X, Y
 
@@ -834,7 +827,7 @@ def Plot3D(
             get_z_list,
             base_num,
             is_save=is_save,
-            model=model,
+            file_name=model,
             is_multiproc=is_multiproc
         )
 
@@ -842,6 +835,8 @@ def Plot3D(
         Y=NormalizeArray(np.array(Y),y_normalization)
         Z=NormalizeArray(np.array(Z),z_normalization)
     else:
+        if is_save:
+            Save(model,{"X":x_list,"Y":y_list,"Z":get_z_list})
         X=NormalizeArray(np.array(x_list),x_normalization)
         Y=NormalizeArray(np.array(y_list),y_normalization)
         Z=NormalizeArray(np.array(get_z_list),z_normalization)
