@@ -9,31 +9,111 @@ from matplotlib.ticker import MultipleLocator
 from matplotlib.backends.backend_pdf import PdfPages
 import pickle
 import copy
+import re
 from bisect import bisect_left, bisect_right
+
 
 plt.rcParams["font.sans-serif"] = "Times"
 plt.rcParams["mathtext.fontset"] = "stix"
 plt.rcParams["backend"] = "Qt5Agg"
 
 
+
+
+
 from Utility.Log import *
 from Utility.Constant import *
 from Utility.MathUtil import *
+try:
+    import psutil
+    _no_psutil=False
+except:
+    _no_psutil=True
+    Info("module psutil is not fould. Using os module only.")
+
+try:
+    from threadpoolctl import threadpool_limits
+    _no_threadpoolctl=False
+except:
+    _no_threadpoolctl=True
+    Warning("module threadpoolctl is not fould. Unable to control threads.")
+
+
+_pool=None
+_pool_size=0
+
+_default_output_dir="."+ os.sep + "output"
 
 
 
-def SavePDF(file_name, figure):
-    file_name = file_name + ".pdf"
-    MKDirsToFile(file_name)
-    with PdfPages(file_name) as pdf:
+def LimitThreads(threads_limit,user_api=None):
+    if _no_threadpoolctl:
+        return None
+    else:
+        threadpool_limits(threads_limit,user_api)
+        return threads_limit
+
+def RegisterPool(process_num,threads_limit=None, user_api=None):
+    '''Register a pool with N processes (not larger than logical cores)
+
+    Parameters
+    ----------
+    process_num : int
+        should be smaller than logical cores
+
+    Returns
+    -------
+    int
+        real registered process number
+    '''
+    global _pool, _pool_size
+
+    if _pool==None:
+        log_cores = LogCores()
+        if process_num>log_cores:
+            Info("Register process number exceed max cores of the computer!")
+        process_num = min(log_cores, process_num)
+        Info("Register pool with {} processes".format(process_num))
+        _pool = Pool(process_num,initializer=LimitThreads,initargs=(threads_limit,user_api))
+        _pool_size = process_num
+        return process_num
+    else:
+        return 0
+
+def PhyCores():
+    if _no_psutil:
+        Warning("No psutil found. Using os.cpu_count() instead. May not be the real physical cores.")
+        return os.cpu_count()
+    else:
+        return psutil.cpu_count(logical=False)
+
+def RecommendedCores():
+    return PhyCores()-1
+
+def LogCores():
+    return os.cpu_count()
+
+def ClosePool():
+    global _pool
+    _pool.close()
+    _pool.join()
+    _pool=None
+
+
+
+
+def SavePDF(figure, file_name,dir_path = _default_output_dir):
+    path=ConcatFilePath(file_name,dir_path,postfix="pdf")
+    MKDirsToFile(path)
+    with PdfPages(path) as pdf:
         pdf.savefig(figure)
         # pdf.savefig(figure, bbox_inches="tight")
 
 
-def SaveSVG(file_name, figure):
-    file_name = file_name + ".eps"
-    MKDirsToFile(file_name)
-    figure.savefig(file_name, format="eps", dpi=300)
+def SaveSVG(figure, file_name ,dir_path = _default_output_dir):
+    path=ConcatFilePath(file_name,dir_path,postfix="eps")
+    MKDirsToFile(path)
+    figure.savefig(path, format="eps", dpi=300)
 
 
 def ZPlot(
@@ -144,14 +224,14 @@ def ZPlot(
         plt.show()
 
     if is_save:
-        SavePDF("output" + os.sep + "ZPlot", fig)
+        SavePDF(fig,"ZPlot")
 
     return fig, (ax1, ax2)
 
 
 
 
-def PDRead(file_name, *arg, **kwargs):
+def PDRead(file_name,dir_path = _default_output_dir,postfix="csv", *arg, **kwargs):
     '''read data of "csv" or "xls" etc. form.
 
     Parameters
@@ -164,21 +244,38 @@ def PDRead(file_name, *arg, **kwargs):
     DataFrame
         DataFrame form
     '''
-    format = file_name.split(".")[-1]
-    if format == "csv":
-        return pd.read_csv(file_name, *arg, **kwargs)
-    elif format in ["xls", "xlsx", "xlsm", "xlsb", "odf", "ods", "odt"]:
-        return pd.read_excel(file_name, *arg, **kwargs)
+    path=ConcatFilePath(file_name=file_name,dir_path=dir_path,postfix=postfix)
+    if postfix == "csv":
+        return pd.read_csv(path, *arg, **kwargs)
+    elif postfix in ["xls", "xlsx", "xlsm", "xlsb", "odf", "ods", "odt"]:
+        return pd.read_excel(path, *arg, **kwargs)
     else:
-        raise ValueError("Unknown format caught!")
+        raise ValueError("Unknown format caught! ({})".format(postfix))
 
-def PDSave(T,file_name,*arg,**kwargs):
-    format = file_name.split(".")[-1]
-    MKDirsToFile(file_name)
-    if format == "csv":
-        T.to_csv(file_name,*arg,**kwargs)
+def Save(data,file_name,dir_path = _default_output_dir,postfix="pickle"):
+    path = ConcatFilePath(file_name=file_name,dir_path=dir_path,postfix=postfix)
+    MKDirsToFile(path)
+    with open(path, "wb") as f:
+        pickle.dump(data, f)
+
+def Load(file_name,dir_path = _default_output_dir,postfix="pickle"):
+    data = None
+    path = ConcatFilePath(file_name=file_name,dir_path=dir_path,postfix=postfix)
+    with open(path, "rb") as f:
+        data = pickle.load(f)
+    return data
+
+
+
+
+
+def PDSave(T,file_name,dir_path = _default_output_dir,postfix="csv",*arg,**kwargs):
+    path = ConcatFilePath(file_name=file_name,dir_path=dir_path,postfix=postfix)
+    MKDirsToFile(path)
+    if postfix == "csv":
+        T.to_csv(path,*arg,**kwargs)
     else:
-        writer = pd.ExcelWriter(file_name)
+        writer = pd.ExcelWriter(path)
         T.to_excel(writer,*arg,**kwargs)
         writer.close()
 
@@ -243,27 +340,24 @@ def EqualToAbs(x, y, accuracy=1e-10, abs_zero=1e-14):
     return True
 
 
-def static_assign_jobs(k_list, process_num):
+def static_assign_jobs(p_list, process_num):
     jobs = []
-    num_k = len(k_list)
+    num_k = len(p_list)
     num_job = int(num_k / process_num)
     num_remain = num_k % process_num
     cnt = 0
     for i in range(0, process_num):
         if num_remain == 0:
-            jobs.append(k_list[cnt : cnt + num_job])
+            jobs.append(p_list[cnt : cnt + num_job])
             cnt += num_job
         else:
-            jobs.append(k_list[cnt : cnt + num_job + 1])
+            jobs.append(p_list[cnt : cnt + num_job + 1])
             cnt += num_job + 1
             num_remain -= 1
 
-    # jobs.append(k_list[cnt:len(k_list)])
     return jobs
 
 
-def OperObj(obj, func, *arg, **kwargs):
-    return func(obj, arg, kwargs)
 
 
 # Usage: using multiprocess method to create several objects of a class, and then invoke certain operator
@@ -272,63 +366,49 @@ def OperObj(obj, func, *arg, **kwargs):
 #   return *obj.GetParam(),obj.GetGroundEnergy()
 # kw={"class":FourBdBLGHFPolar,"operator":GetEg}
 # P=np.array(MultiprocTask(p_list,MultiOperObj,4,**kw))
-def MultiOperObj(p_list, *arg, **kwargs):
-    rtn = []
-    begin = time.time()
-    Log("DEBUG")
-    for i in range(len(p_list)):
-        p = p_list[i]
-        obj = kwargs["class"](*p)
-        rtn.append(
-            OperObj(obj, kwargs["operator"], arg, kwargs)
-        )  # could be wrong when shallow copy is used
-        del obj
-        end = time.time()
-        Info(
-            "============PID %d completes (%d/%d) jobs cost %fs"
-            % (os.getpid(), i + 1, len(p_list), end - begin)
-        )
+# def MultiOperObj(p_list, *arg, **kwargs):
+#     rtn = []
+#     begin = time.time()
+#     Log("DEBUG")
+#     for i in range(len(p_list)):
+#         p = p_list[i]
+#         obj = kwargs["class"](*p)
+#         rtn.append(
+#             OperObj(obj, kwargs["operator"], arg, kwargs)
+#         )  # could be wrong when shallow copy is used
+#         del obj
+#         end = time.time()
+#         Info(
+#             "============PID %d completes (%d/%d) jobs cost %fs"
+#             % (os.getpid(), i + 1, len(p_list), end - begin)
+#         )
 
-    Complete()
-    return rtn
+#     Complete()
+#     return rtn
 
+def OperObj(cls_param, cls, op, **op_kwargs):
+    obj = cls(*cls_param)
+    rtn = op(obj, **op_kwargs)
+    del obj
+    return rtn 
 
-# def WarpFunc(func,*arg, **kwargs):
-#     def warp_func_0(p, *arg, **kwargs):
-#         return func(p)
-#     def warp_func_1(p, *arg, **kwargs):
-#         return func(p, *arg)
-#     def warp_func_2(p, *arg, **kwargs):
-#         return func(p, **kwargs)
-#     def warp_func_3(p, *arg, **kwargs):
-#         return func(p, *arg, **kwargs)
-#     if len(arg)==0:
-#         if len(kwargs)==0:
-#             return 
-#         else:
-#             return warp_func_2
-#     elif len(kwargs)==0:
+def WarpParams(p_list):
+        k_list=[]
+        for p in p_list:
+            k_list.append((p,))
+        return k_list
 
-
-
-
-def MultiprocTask(p_list, func, process_num=2, is_self_unzip=True, is_param_form=True, *arg, **kwargs):
-    '''tackling tasks with multiprocess method
+def MultiprocTask(func, p_list=[(... ,), (... ,)], process_num=2, **kwargs):
+    '''tackling tasks with multiprocess method. 
 
     Parameters
     ----------
     p_list : list
-        input parameter list
+        input parameter list. For p in p_list, p should take [(... ,), (... ,)] , [scalar 1 , scalar 2] form.
     func : function
         function
     process_num : int, >=1
         process number
-    is_self_unzip : bool, optional
-        True: setting for function MultiOperObj.
-        False: setting for usual case.
-    is_param_form : bool, optional
-        True: p should have take (x1, x2, x3, ...), [x1, x2, x3, ...], or x1 form.
-        False: This function will help you to wrap the p_list in above form.
 
     Returns
     -------
@@ -341,66 +421,53 @@ def MultiprocTask(p_list, func, process_num=2, is_self_unzip=True, is_param_form
         unknown g_ss_run_mode value
     '''
 
-    def warp_plist(p_list):
-        k_list=[]
-        for p in p_list:
-            k_list.append([p])
-        return k_list
 
     begin = time.time()
     rtn = []
 
-    if is_param_form==False:
-        p_list=warp_plist(p_list)
 
     if g_ss_run_mode == "Release" and process_num > 1:
 
-        process_num = min(os.cpu_count(), process_num)
-        pool = Pool(process_num)
+        global _pool
+        if _pool==None:
+            RegisterPool(process_num)
+        else:
+            process_num = _pool_size
         res_l = []
 
         jobs = static_assign_jobs(p_list, process_num)
 
+        if not (isinstance(jobs[0][0],tuple) or (not IsIterable(jobs[0][0]))):
+            Warning("The p_list is not in [(... ,), (... ,)] , [scalar 1 , scalar 2] form. The parameters may not be what you expect. You may have to use WarpParams(p_list) to wrap p_list.")
+
         for job in jobs:
-            if is_self_unzip:
-                res = pool.apply_async(func, (job, arg), kwargs)
+            for p in job:
+                if IsIterable(p):
+                    res = _pool.apply_async(func, (*p, ), kwds=kwargs)
+                else:
+                    res = _pool.apply_async(func, (p, ), kwds=kwargs)
                 res_l.append(res)
-            else:
-                for p in job:
-                    # p should take (x1, x2, x3, ...) or [x1, x2, x3, ...] form
-                    if IsIterable(p):
-                        res = pool.apply_async(func, (*p, *arg), kwargs)
-                    else:
-                        res = pool.apply_async(func, (p, *arg), kwargs)
-                    res_l.append(res)
-        pool.close()
-        pool.join()
 
         for res in res_l:
-            v = res.get()
-            if IsIterable(v):
-                rtn.extend(v)
-            else:
-                rtn.append(v)
+            r = res.get()
+            # if IsIterable(v):
+            #     rtn.extend(v)
+            # else:
+            #     rtn.append(v)
+            rtn.append(r)
             
     elif g_ss_run_mode == "Debug" or process_num <= 1:
-        if is_self_unzip:
-            res = func(p_list, *arg, **kwargs)
-            if IsIterable(res):
-                rtn.extend(res)
+        for p in p_list:
+            # p should take (x1, x2, x3, ...), [x1, x2, x3, ...], or x1 form
+            if IsIterable(p): 
+                res = func(*p, **kwargs)
             else:
-                rtn.append(res)
-        else:
-            for p in p_list:
-                # p should take (x1, x2, x3, ...), [x1, x2, x3, ...], or x1 form
-                if IsIterable(p):
-                    res = func(*p, *arg, **kwargs)
-                else:
-                    res = func(p, *arg, **kwargs)
-                if IsIterable(res):
-                    rtn.extend(res)
-                else:
-                    rtn.append(res)
+                res = func(p, **kwargs)
+            # if IsIterable(res):
+            #     rtn.extend(res)
+            # else:
+            #     rtn.append(res)
+            rtn.append(res)
     else:
         raise ValueError("unknown g_ss_run_mode value.")
 
@@ -408,9 +475,117 @@ def MultiprocTask(p_list, func, process_num=2, is_self_unzip=True, is_param_form
     Success(
         "PID:"
         + str(os.getpid())
-        + " MultiprocGetE_k using %d Process cost %fs" % (process_num, end - begin)
+        + " MultiprocTasks using %d Process cost %fs" % (process_num, end - begin)
     )
     return rtn
+
+
+# def MultiprocTask(p_list, func, process_num=2, is_self_unzip=True, is_param_form=True, *arg, **kwargs):
+#     '''tackling tasks with multiprocess method
+
+#     Parameters
+#     ----------
+#     p_list : list
+#         input parameter list
+#     func : function
+#         function
+#     process_num : int, >=1
+#         process number
+#     is_self_unzip : bool, optional
+#         True: setting for function MultiOperObj.
+#         False: setting for usual case.
+#     is_param_form : bool, optional
+#         True: p should have take (x1, x2, x3, ...), [x1, x2, x3, ...], or x1 form.
+#         False: This function will help you to wrap the p_list in above form.
+
+#     Returns
+#     -------
+#     list
+#         Output
+
+#     Raises
+#     ------
+#     ValueError
+#         unknown g_ss_run_mode value
+#     '''
+
+#     def warp_plist(p_list):
+#         k_list=[]
+#         for p in p_list:
+#             k_list.append([p])
+#         return k_list
+
+#     begin = time.time()
+#     rtn = []
+
+#     if is_param_form==False:
+#         p_list=warp_plist(p_list)
+
+#     if g_ss_run_mode == "Release" and process_num > 1:
+
+#         global _pool
+#         if _pool==None:
+#             RegisterPool(process_num)
+#         else:
+#             process_num = _pool_size
+#         res_l = []
+
+#         jobs = static_assign_jobs(p_list, process_num)
+
+#         for job in jobs:
+#             if is_self_unzip:
+#                 res = _pool.apply_async(func, (job, *arg), kwds=kwargs)
+#                 res_l.append(res)
+#             else:
+#                 for p in job:
+#                     # p should take (x1, x2, x3, ...) or [x1, x2, x3, ...] form
+#                     if IsIterable(p):
+#                         res = _pool.apply_async(func, (*p, *arg), kwds=kwargs)
+#                     else:
+#                         res = _pool.apply_async(func, (p, *arg), kwds=kwargs)
+#                     res_l.append(res)
+#         # pool.close()
+#         # pool.join()
+
+#         for res in res_l:
+#             v = res.get()
+#             # if IsIterable(v):
+#             #     rtn.extend(v)
+#             # else:
+#             #     rtn.append(v)
+#             rtn.append(v)
+            
+#     elif g_ss_run_mode == "Debug" or process_num <= 1:
+#         if is_self_unzip:
+#             res = func(p_list, *arg, **kwargs)
+#             # if IsIterable(res):
+#             #     rtn.extend(res)
+#             # else:
+#             #     rtn.append(res)
+#             rtn.append(res)
+#         else:
+#             for p in p_list:
+#                 # p should take (x1, x2, x3, ...), [x1, x2, x3, ...], or x1 form
+#                 if IsIterable(p):
+#                     res = func(*p, *arg, **kwargs)
+#                 else:
+#                     res = func(p, *arg, **kwargs)
+#                 # if IsIterable(res):
+#                 #     rtn.extend(res)
+#                 # else:
+#                 #     rtn.append(res)
+#                 rtn.append(res)
+#     else:
+#         raise ValueError("unknown g_ss_run_mode value.")
+
+#     end = time.time()
+#     Success(
+#         "PID:"
+#         + str(os.getpid())
+#         + " MultiprocTasks using %d Process cost %fs" % (process_num, end - begin)
+#     )
+#     return rtn
+
 
 
 def GetNodeProcNum():
@@ -422,25 +597,6 @@ def GetNodeProcNum():
     return process_num
 
 
-
-# def MultiprocGetZList(q_list, GetZList, is_multiproc=False):
-#     """
-#     calculate a list of z in 3D
-#     """
-
-#     z_list = []
-#     if is_multiproc:
-#         # Multiprocessing
-#         # print("Applying multi-processing to get z list")
-#         rtn = MultiprocTask(q_list, GetZList)
-#         z_list = rtn
-#     else:
-#         # Single processing
-#         # print("Applying single processing to get z list")
-#         for i in range(len(q_list)):
-#             l = GetZList(q_list[i])
-#             z_list.append(l)
-#     return z_list
 
 def SetXYTicks(ax, labelsize, *arg, **kwargs):
     is_yticks_set = False
@@ -527,27 +683,47 @@ def CalculateXY(
     file_name="Y-X",
     f_param={},
     is_one_by_one=False,
+    is_multiproc=False
 ):
 
     X = np.linspace(x_list[0], x_list[1], base_num)
 
     if len(f_param) == 0:
+        
         if is_one_by_one:
-            Y = np.vectorize(get_y_list)(X)
+            # Y = np.vectorize(get_y_list)(X)
+            if is_multiproc:
+                Y=MultiprocTask(get_y_list, WarpParams(X), RecommendedCores())
+            else:
+                Y = np.vectorize(get_y_list)(X)
         else:
-            Y = get_y_list(X)
+            if is_multiproc:
+                Y=MultiprocTask(get_y_list, WarpParams(X), RecommendedCores())
+            else:
+                Y = get_y_list(X)
     else:
         if is_one_by_one:
-            Y = np.vectorize(get_y_list)(X, **f_param)
+            # Y = np.vectorize(get_y_list)(X)
+            if is_multiproc:
+                Y=MultiprocTask(get_y_list, WarpParams(X), RecommendedCores(), **f_param)
+            else:
+                Y = np.vectorize(get_y_list)(X, **f_param)
         else:
-            Y = get_y_list(X, **f_param)
+            if is_multiproc:
+                Y=MultiprocTask(get_y_list, WarpParams(X), RecommendedCores(), **f_param)
+            else:
+                Y = get_y_list(X, **f_param)
+        # if is_one_by_one:
+        #     Y = np.vectorize(get_y_list)(X, **f_param)
+        # else:
+        #     Y = get_y_list(X, **f_param)
 
 
     
     
 
     if is_save:
-        Save(file_name,{"X": X, "Y": Y})
+        Save({"X": X, "Y": Y},file_name)
 
     return X, Y
 
@@ -574,7 +750,9 @@ def PlotXY(
     axes=None,
     f_param={},
     is_one_by_one=False,
+    is_multiproc=False,
     is_show=True,
+    figsize=(8,8),
     *arg,
     **kwargs
 ):
@@ -590,12 +768,13 @@ def PlotXY(
             title,
             f_param,
             is_one_by_one,
+            is_multiproc,
         )
         X=NormalizeArray(np.array(X),x_normalization)
         Y=NormalizeArray(np.array(Y),y_normalization)
     else:
         if is_save:
-            Save(title,{"X": x_list, "Y": get_y_list})
+            Save({"X": x_list, "Y": get_y_list},title)
         X=NormalizeArray(np.array(x_list),x_normalization)
         Y=NormalizeArray(np.array(get_y_list),y_normalization)
     
@@ -605,7 +784,7 @@ def PlotXY(
     ax = axes
 
     if ax == None:
-        # plt.figure()
+        plt.figure(figsize=figsize)
         ax = plt.axes()
         ax.tick_params(labelsize=label_sz)
         ax.set_xlabel(xlabel, fontsize=font_sz)
@@ -625,10 +804,10 @@ def PlotXY(
         pass
 
     XYFigPlot(ax, style, X, Y, lw=line_w,label=legend,*arg,**kwargs)
+    if legend!=None:
+        handles, labels = ax.get_legend_handles_labels()
+        ax.legend(handles, labels)
     if is_show == True:
-        if legend!=None:
-            handles, labels = ax.get_legend_handles_labels()
-            ax.legend(handles, labels)
         plt.show()
     return ax
 
@@ -712,7 +891,7 @@ def PlotMultiLines(
         
 
     if is_save:
-        Save(title,{"X":X,"Y":Y,"Z_list":Z_list})
+        Save({"X":X,"Y":Y,"Z_list":Z_list},title)
     
     if is_show:
         handles, labels = ax.get_legend_handles_labels()
@@ -722,33 +901,73 @@ def PlotMultiLines(
 
 
 def XYFigPlot(ax, style, X, Y, *arg, **kwargs):
-    if style == "line":
-        ax.plot(X, Y, *arg, **kwargs)
-    elif style == "scatter":
-        ax.scatter(X, Y, marker="o", c="grey", *arg, **kwargs)
-    elif style == "black_scatter":
-        ax.scatter(X, Y, marker="o", c="black", *arg, **kwargs)
-    elif style == "blue_scatter":
-        ax.scatter(X, Y, marker="o", c="blue", *arg, **kwargs)
-    elif style == "red_scatter":
-        ax.scatter(X, Y, marker="o", c="red", *arg, **kwargs)
-    elif style == "blue_line":
-        ax.plot(X, Y, c="blue", *arg, **kwargs)
-    elif style == "red_line":
-        ax.plot(X, Y, c="red", *arg, **kwargs)
-    elif style == "black_line":
-        ax.plot(X, Y, c="black", *arg, **kwargs)
-    elif style == "dash_black_line":
-        ax.plot(X, Y, c="black", linestyle="--")
-    elif style == "blue_bar":
-        ax.bar(X, Y, color="mediumblue", *arg, **kwargs)
-    else:
-        raise ValueError("unknown style.")
+    def extract_color(str,exclusion=[]):
+        parts=str.split("_")
+        color=None
+        for s in parts:
+            if np.all(np.array(exclusion)!=s):
+                color=s
+                return color
+            
 
-def Save(file_name,data):
-    MKOutput()
-    with open("output" + os.sep + file_name + ".pickle", "wb") as f:
-        pickle.dump(data, f)
+    line_pattern=re.compile(r"\w*line")
+    scatter_pattern=re.compile(r"\w*scatter")
+    bar_pattern=re.compile(r"\w*bar")
+    line_list=line_pattern.findall(style)
+    scatter_list=scatter_pattern.findall(style)
+    bar_list=bar_pattern.findall(style)
+    if len(line_list)!=0:
+        line_str=line_list[0]
+        color=extract_color(line_str,["dash","line"])
+        if re.match(r"dash",line_str)!=None:
+            ax.plot(X, Y, c=color, linestyle="--", *arg, **kwargs)
+        else:
+            ax.plot(X, Y, c=color, *arg, **kwargs)
+    elif len(scatter_list)!=0:
+        scatter_str=scatter_list[0]
+        color=extract_color(scatter_str,["scatter"])
+        ax.scatter(X, Y, marker="o", c=color, *arg, **kwargs)
+    elif len(bar_list)!=0:
+        bar_str=bar_list[0]
+        color=extract_color(bar_str,["bar"])
+        ax.bar(X, Y, marker="o", c=color, *arg, **kwargs)
+    else:
+        raise ValueError("unknown style {}.".format(style))
+    
+
+
+    # if style == "line":
+    #     ax.plot(X, Y, *arg, **kwargs)
+    # elif style == "scatter":
+    #     ax.scatter(X, Y, marker="o", *arg, **kwargs)
+    # elif style == "grey_scatter":
+    #     ax.scatter(X, Y, marker="o", c="grey", *arg, **kwargs)
+    # elif style == "black_scatter":
+    #     ax.scatter(X, Y, marker="o", c="black", *arg, **kwargs)
+    # elif style == "blue_scatter":
+    #     ax.scatter(X, Y, marker="o", c="blue", *arg, **kwargs)
+    # elif style == "red_scatter":
+    #     ax.scatter(X, Y, marker="o", c="red", *arg, **kwargs)
+    # elif style == "orange_scatter":
+    #     ax.scatter(X, Y, marker="o", c="orange", *arg, **kwargs)
+    # elif style == "green_scatter":
+    #     ax.scatter(X, Y, marker="o", c="green", *arg, **kwargs)
+    # elif style == "blue_line":
+    #     ax.plot(X, Y, c="blue", *arg, **kwargs)
+    # elif style == "red_line":
+    #     ax.plot(X, Y, c="red", *arg, **kwargs)
+    # elif style == "black_line":
+    #     ax.plot(X, Y, c="black", *arg, **kwargs)
+    # elif style == "dash_black_line":
+    #     ax.plot(X, Y, c="black", linestyle="--", *arg, **kwargs)
+    # elif style == "dash_red_line":
+    #     ax.plot(X, Y, c="red", linestyle="--", *arg, **kwargs)
+    # elif style == "blue_bar":
+    #     ax.bar(X, Y, color="mediumblue", *arg, **kwargs)
+    # else:
+    #     raise ValueError("unknown style.")
+
+
 
 def Calculate3D(
     x_list,
@@ -769,18 +988,17 @@ def Calculate3D(
     )
 
     if is_multiproc:
-        z_list = MultiprocTask(p_list, GetZList,is_self_unzip=False,is_param_form=False)
+        z_list = MultiprocTask(GetZList, WarpParams(p_list))
     else:
-        z_list = MultiprocTask(p_list, GetZList,1,is_self_unzip=False,is_param_form=False)
+        z_list = MultiprocTask(GetZList, WarpParams(p_list) ,1)
 
-    # z_list = MultiprocGetZList(p_list, GetZList, is_multiproc)
     Z = np.array(z_list)
 
 
     Z = Z.reshape(base_num, base_num)
 
     if is_save:
-        Save(file_name,{"X": X, "Y": Y, "Z_list": Z})
+        Save({"X": X, "Y": Y, "Z_list": Z},file_name)
 
     return Z, X, Y
 
@@ -836,7 +1054,7 @@ def Plot3D(
         Z=NormalizeArray(np.array(Z),z_normalization)
     else:
         if is_save:
-            Save(model,{"X":x_list,"Y":y_list,"Z":get_z_list})
+            Save({"X":x_list,"Y":y_list,"Z":get_z_list},model)
         X=NormalizeArray(np.array(x_list),x_normalization)
         Y=NormalizeArray(np.array(y_list),y_normalization)
         Z=NormalizeArray(np.array(get_z_list),z_normalization)
@@ -852,7 +1070,7 @@ def Plot3D(
                 )
             elif style == "scatter":
                 fig = plt.figure(
-                    figsize=figsize, bbox_inches="tight", pad_inches=5
+                    figsize=figsize#, bbox_inches="tight", pad_inches=5
                 )  # (8,6)
             ax = plt.axes(projection="3d")
 
@@ -912,7 +1130,7 @@ def Plot3D(
     if is_show:
         plt.show()
     if is_save:
-        SavePDF("output" + os.sep + title.replace(os.sep, "_"), fig)
+        SavePDF(fig,title.replace(os.sep, "_"))
     return ax
 
 

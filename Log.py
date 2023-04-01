@@ -1,20 +1,33 @@
 import sys
 import os
 import time
-from Utility.Constant import g_MB
+from Utility.Constant import g_MB, g_ss_run_mode
+
+_default_output_dir="."+ os.sep + "output"
 
 try:
     import psutil
+    _no_psutil=False
 except:
-    raise ModuleNotFoundError("module psutil is needed!")
+    _no_psutil=True
+    print("@Info: module psutil is not fould. Using os module only.")
 
 
 try:
     from loguru import logger
+    _no_loguru=False
 except:
-    raise ModuleNotFoundError("module loguru is needed!")
+    _no_loguru=True
+    import logging
+    import logging.handlers
+    _logging_level={"DEBUG":logging.DEBUG,"INFO":logging.INFO,"WARNING":logging.WARNING,"ERROR":logging.ERROR,"CRITICAL":logging.CRITICAL}
+    logger=logging.getLogger(__name__)
+    print("@Info: module loguru is not found. Using logging module.")
 
-_log_full_print = False
+if g_ss_run_mode=="Debug":
+    _log_full_print= True
+else:
+    _log_full_print= False
 
 
 def SplitDirFile(s):
@@ -24,19 +37,40 @@ def SplitDirFile(s):
     else:
         return None, s
 
+def ConcatFilePath(file_name,dir_path,postfix):
+    path = dir_path
+    format=file_name.split(".")
+    if len(format)!=1:
+        Warning("Two postfix found -- file_name ({}) and postfix ({}).".format(format[-1],postfix))
+    if dir_path[-1]!=os.sep:
+        path+=os.sep
+    path+=file_name+"."+postfix
+    return path
 
-def MKDirsToFile(s):
-    path, file_name = SplitDirFile(s)
-    if path != None and not os.path.exists(path):
-        os.makedirs(path)
+def DivideFilePath(path):
+    dir_path,file_name = SplitDirFile(path)
+    file_name_parts=file_name.split(".")
+    if len(file_name_parts)!=2:
+        Error("filename ({}) is not in XXX.xxx form.".format(file_name))
+    file_name=file_name_parts[0]
+    postfix=file_name_parts[-1]
+    return {"file_name":file_name,"dir_path":dir_path,"postfix":postfix}
+
+
+
+
+
+def MKDirsToFile(path):
+    dir_path, file_name = SplitDirFile(path)
+    if dir_path != None and not os.path.exists(dir_path):
+        os.makedirs(dir_path)
         return True
     else:
         return False
 
 
-def MKOutput(path="."):
-    path = path + os.sep + "output" + os.sep
-    return MKDirsToFile(path)
+def MKOutput(path=_default_output_dir):
+    return MKDirsToFile(path + os.sep)
 
 
 def Log(level="debug", is_full_print=False):
@@ -44,35 +78,54 @@ def Log(level="debug", is_full_print=False):
     Initialize logger
     """
     level = level.upper()
-    cmd_format = "<level>{level:<8}</level> | <level>{message}</level>"
     err_id, out_id = (-1, -1)
-
-    logger.remove()
-    err_id = logger.add(sys.stderr, level=level, format=cmd_format, enqueue=True)
-
+    
+    if _no_loguru:
+        if _no_psutil:
+            cmd_format = "%(asctime)s | %(levelname)s | %(message)s"
+        else:
+            cmd_format = "%(levelname)s | %(message)s"
+        logging.basicConfig(level=_logging_level[level],format=cmd_format)
+    else:
+        cmd_format = "<level>{level:<8}</level> | <level>{message}</level>"
+        logger.remove()
+        err_id = logger.add(sys.stderr, level=level, format=cmd_format, enqueue=True)
+    global _log_full_print
     _log_full_print = is_full_print
 
-    return err_id, out_id
-
-
-def AddLogFile(file_name="output/file.log", level="debug"):
+def AddLogFile(file_name="file",dir_path = _default_output_dir,postfix="log", level="debug"):
     level = level.upper()
-    if _log_full_print:
-        file_format = "{time:YY-MM-DD HH:mm:ss} | <level>{level:<8}</level> | <level>{message}</level> "
-    else:
-        file_format = "<level>{level:<8}</level> | <level>{message}</level> "
+    
+    path=ConcatFilePath(file_name,dir_path,postfix)
     out_id = (-1, -1)
-    MKOutput()
-    out_id = logger.add(
-        file_name,
-        level=level,
-        encoding="utf-8",
-        enqueue=True,
-        format=file_format,
-        rotation="500 MB",
-        mode="w",
-    )
-    return out_id
+    MKDirsToFile(path)
+    if _no_loguru:
+        if _log_full_print:
+            file_format = "%(asctime)s | %(levelname)s | %(message)s"
+        else:
+            file_format ="%(levelname)s | %(message)s"
+        file_handler=logging.handlers.RotatingFileHandler(path)
+        file_handler.setFormatter(logging.Formatter(file_format))
+        file_handler.setLevel(_logging_level[level])
+        logger.addHandler(file_handler)
+    else:
+        if _log_full_print:
+            file_format = "{time:YY-MM-DD HH:mm:ss} | <level>{level:<8}</level> | <level>{message}</level> "
+        else:
+            file_format = "<level>{level:<8}</level> | <level>{message}</level> "
+        out_id = logger.add(
+            path,
+            level=level,
+            encoding="utf-8",
+            enqueue=True,
+            format=file_format,
+            rotation="500 MB",
+            mode="w",
+        )
+    
+
+
+
 
 
 def Debug(s):
@@ -100,7 +153,10 @@ def Success(s):
         s = GetProcInfo() + str(s)
     else:
         s = str(s)
-    logger.success(s)
+    if _no_loguru:
+        logger.info(s)
+    else:
+        logger.success(s)
     sys.stdout.flush()
     sys.stderr.flush()
 
@@ -136,20 +192,29 @@ def Critical(s):
 
 
 def Complete():
-    logger.complete()
+    if _no_loguru:
+        pass
+    else:
+        logger.complete()
 
 
 def GetProcInfo():
     pid = os.getpid()
-    p = psutil.Process(pid)
-    mem = psutil.virtual_memory()
-    mem_info = p.memory_full_info()
-    t = time.time() - p.create_time()
-    proc_info = {"PID": pid, "PPID": p.ppid(), "Time": t, "USS": mem_info.uss / g_MB}
-    return " (P/PP:{}/{}, T(s):{:.1f}, U/F(MB):{}/{})\t| ".format(
-        proc_info["PID"],
-        proc_info["PPID"],
-        proc_info["Time"],
-        int(proc_info["USS"]),
-        int(mem.free / g_MB),
-    )
+    if _no_psutil:
+        return "(PID:{})\t| ".format(pid)
+    else:
+        p = psutil.Process(pid)
+        mem = psutil.virtual_memory()
+        mem_info = p.memory_full_info()
+        t = time.time() - p.create_time()
+        proc_info = {"PID": pid, "PPID": p.ppid(), "Time": t, "USS": mem_info.uss / g_MB}
+        return " (P/PP:{}/{}, T(s):{:.1f}, U/F(MB):{}/{}) | ".format(
+            proc_info["PID"],
+            proc_info["PPID"],
+            proc_info["Time"],
+            int(proc_info["USS"]),
+            int(mem.free / g_MB),
+        )
+
+
+Log()
