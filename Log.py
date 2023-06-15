@@ -37,31 +37,31 @@ def SplitDirFile(s):
     else:
         return None, s
 
-def ConcatFilePath(file_name,dir_path,postfix):
+def ConcatFilePath(filename,dir_path,postfix):
     path = dir_path
-    format=file_name.split(".")
+    format=filename.split(".")
     if len(format)!=1:
-        Warning("Two postfix found -- file_name ({}) and postfix ({}).".format(format[-1],postfix))
+        Warning("Two postfix found -- filename ({}) and postfix ({}).".format(format[-1],postfix))
     if dir_path[-1]!=os.sep:
         path+=os.sep
-    path+=file_name+"."+postfix
+    path+=filename+"."+postfix
     return path
 
 def DivideFilePath(path):
-    dir_path,file_name = SplitDirFile(path)
-    file_name_parts=file_name.split(".")
-    if len(file_name_parts)!=2:
-        Error("filename ({}) is not in XXX.xxx form.".format(file_name))
-    file_name=file_name_parts[0]
-    postfix=file_name_parts[-1]
-    return {"file_name":file_name,"dir_path":dir_path,"postfix":postfix}
+    dir_path,filename = SplitDirFile(path)
+    filename_parts=filename.split(".")
+    if len(filename_parts)!=2:
+        Error("filename ({}) is not in XXX.xxx form.".format(filename))
+    filename=filename_parts[0]
+    postfix=filename_parts[-1]
+    return {"filename":filename,"dir_path":dir_path,"postfix":postfix}
 
 
 
 
 
 def MKDirsToFile(path):
-    dir_path, file_name = SplitDirFile(path)
+    dir_path, filename = SplitDirFile(path)
     if dir_path != None and not os.path.exists(dir_path):
         os.makedirs(dir_path)
         return True
@@ -93,10 +93,10 @@ def Log(level="debug", is_full_print=False):
     global _log_full_print
     _log_full_print = is_full_print
 
-def AddLogFile(file_name="file",dir_path = _default_output_dir,postfix="log", level="debug"):
+def AddLogFile(filename="file",dir_path = _default_output_dir,postfix="log", level="debug"):
     level = level.upper()
     
-    path=ConcatFilePath(file_name,dir_path,postfix)
+    path=ConcatFilePath(filename,dir_path,postfix)
     out_id = (-1, -1)
     MKDirsToFile(path)
     if _no_loguru:
@@ -138,7 +138,7 @@ def Debug(s):
     sys.stderr.flush()
 
 
-def Info(s=""):
+def Info(s):
     if _log_full_print:
         s = GetProcInfo() + str(s)
     else:

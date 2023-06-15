@@ -15,7 +15,7 @@ from bisect import bisect_left, bisect_right
 
 plt.rcParams["font.sans-serif"] = "Times"
 plt.rcParams["mathtext.fontset"] = "stix"
-plt.rcParams["backend"] = "Qt5Agg"
+# plt.rcParams["backend"] = "Qt5Agg"
 
 
 
@@ -101,19 +101,11 @@ def ClosePool():
 
 
 
+def Linstep(start_point,end_point,step):
+    total_num=int((end_point-start_point)/step)+1
 
-def SavePDF(figure, file_name,dir_path = _default_output_dir):
-    path=ConcatFilePath(file_name,dir_path,postfix="pdf")
-    MKDirsToFile(path)
-    with PdfPages(path) as pdf:
-        pdf.savefig(figure)
-        # pdf.savefig(figure, bbox_inches="tight")
+    return np.linspace(start_point,end_point,total_num)
 
-
-def SaveSVG(figure, file_name ,dir_path = _default_output_dir):
-    path=ConcatFilePath(file_name,dir_path,postfix="eps")
-    MKDirsToFile(path)
-    figure.savefig(path, format="eps", dpi=300)
 
 
 def ZPlot(
@@ -132,6 +124,7 @@ def ZPlot(
     is_fig_equal=True,
     is_one_by_one=False,
     is_save=True,
+    filename=None,
 ):
     rl_max = space[1].real
     im_max = space[1].imag
@@ -223,20 +216,23 @@ def ZPlot(
     if is_show == True:
         plt.show()
 
+    if filename==None:
+        filename="ZPlot"
+
     if is_save:
-        SavePDF(fig,"ZPlot")
+        SavePDF(fig,filename=filename)
 
     return fig, (ax1, ax2)
 
 
 
 
-def PDRead(file_name,dir_path = _default_output_dir,postfix="csv", *arg, **kwargs):
+def PDRead(filename,dir_path = _default_output_dir,postfix="csv", *arg, **kwargs):
     '''read data of "csv" or "xls" etc. form.
 
     Parameters
     ----------
-    file_name : string
+    filename : string
         file name
 
     Returns
@@ -244,7 +240,7 @@ def PDRead(file_name,dir_path = _default_output_dir,postfix="csv", *arg, **kwarg
     DataFrame
         DataFrame form
     '''
-    path=ConcatFilePath(file_name=file_name,dir_path=dir_path,postfix=postfix)
+    path=ConcatFilePath(filename=filename,dir_path=dir_path,postfix=postfix)
     if postfix == "csv":
         return pd.read_csv(path, *arg, **kwargs)
     elif postfix in ["xls", "xlsx", "xlsm", "xlsb", "odf", "ods", "odt"]:
@@ -252,15 +248,41 @@ def PDRead(file_name,dir_path = _default_output_dir,postfix="csv", *arg, **kwarg
     else:
         raise ValueError("Unknown format caught! ({})".format(postfix))
 
-def Save(data,file_name,dir_path = _default_output_dir,postfix="pickle"):
-    path = ConcatFilePath(file_name=file_name,dir_path=dir_path,postfix=postfix)
+def Save(data=None,filename=None,dir_path = _default_output_dir,postfix="pickle",*arg,**kwarg):
+    if filename==None:
+        Error("filename could not be None")
+    path = ConcatFilePath(filename=filename,dir_path=dir_path,postfix=postfix)
     MKDirsToFile(path)
-    with open(path, "wb") as f:
-        pickle.dump(data, f)
+    if postfix in ["png","jpg"]:
+        plt.savefig(path,*arg,**kwarg)
+    elif postfix=="pickle":
+        with open(path, "wb") as f:
+            pickle.dump(data, f,*arg,**kwarg)
+    elif postfix=="pdf":
+        with PdfPages(path) as pdf:
+            pdf.savefig(data,*arg,**kwarg)
+            # pdf.savefig(figure, bbox_inches="tight")    
+    elif postfix=="svg":
+        plt.savefig(path, format="eps", dpi=200,*arg,**kwarg)
 
-def Load(file_name,dir_path = _default_output_dir,postfix="pickle"):
+
+
+def SavePDF(figure, filename,dir_path = _default_output_dir,postfix="pdf"):
+    path=ConcatFilePath(filename,dir_path,postfix)
+    MKDirsToFile(path)
+    with PdfPages(path) as pdf:
+        pdf.savefig(figure)
+        # pdf.savefig(figure, bbox_inches="tight")
+
+
+def SaveSVG(figure, filename ,dir_path = _default_output_dir):
+    path=ConcatFilePath(filename,dir_path,postfix="eps")
+    MKDirsToFile(path)
+    figure.savefig(path, format="eps", dpi=300)
+
+def Load(filename,dir_path = _default_output_dir,postfix="pickle"):
     data = None
-    path = ConcatFilePath(file_name=file_name,dir_path=dir_path,postfix=postfix)
+    path = ConcatFilePath(filename=filename,dir_path=dir_path,postfix=postfix)
     with open(path, "rb") as f:
         data = pickle.load(f)
     return data
@@ -269,8 +291,8 @@ def Load(file_name,dir_path = _default_output_dir,postfix="pickle"):
 
 
 
-def PDSave(T,file_name,dir_path = _default_output_dir,postfix="csv",*arg,**kwargs):
-    path = ConcatFilePath(file_name=file_name,dir_path=dir_path,postfix=postfix)
+def PDSave(T,filename,dir_path = _default_output_dir,postfix="csv",*arg,**kwargs):
+    path = ConcatFilePath(filename=filename,dir_path=dir_path,postfix=postfix)
     MKDirsToFile(path)
     if postfix == "csv":
         T.to_csv(path,*arg,**kwargs)
@@ -398,6 +420,8 @@ def WarpParams(p_list):
             k_list.append((p,))
         return k_list
 
+
+
 def MultiprocTask(func, p_list=[(... ,), (... ,)], process_num=2, **kwargs):
     '''tackling tasks with multiprocess method. 
 
@@ -420,7 +444,10 @@ def MultiprocTask(func, p_list=[(... ,), (... ,)], process_num=2, **kwargs):
     ValueError
         unknown g_ss_run_mode value
     '''
-
+    # def count_on_completing_jobs(rtn):
+        # completing_job_num+=1
+        # Debug("Completing "+str(completing_job_num)+"/"+str(total_jobs_num))
+        # return rtn
 
     begin = time.time()
     rtn = []
@@ -436,6 +463,8 @@ def MultiprocTask(func, p_list=[(... ,), (... ,)], process_num=2, **kwargs):
         res_l = []
 
         jobs = static_assign_jobs(p_list, process_num)
+        total_jobs_num=len(p_list)
+        completing_job_num=0
 
         if not (isinstance(jobs[0][0],tuple) or (not IsIterable(jobs[0][0]))):
             Warning("The p_list is not in [(... ,), (... ,)] , [scalar 1 , scalar 2] form. The parameters may not be what you expect. You may have to use WarpParams(p_list) to wrap p_list.")
@@ -454,6 +483,12 @@ def MultiprocTask(func, p_list=[(... ,), (... ,)], process_num=2, **kwargs):
             #     rtn.extend(v)
             # else:
             #     rtn.append(v)
+            completing_job_num+=1
+            if total_jobs_num>=10:
+                if completing_job_num%int(total_jobs_num*0.1)==0:
+                    Debug("Completing "+str(completing_job_num)+"/"+str(total_jobs_num))
+            else:
+                Debug("Completing "+str(completing_job_num)+"/"+str(total_jobs_num))
             rtn.append(r)
             
     elif g_ss_run_mode == "Debug" or process_num <= 1:
@@ -680,7 +715,7 @@ def CalculateXY(
     get_y_list,
     base_num=100,
     is_save=False,
-    file_name="Y-X",
+    filename="Y-X",
     f_param={},
     is_one_by_one=False,
     is_multiproc=False
@@ -723,7 +758,7 @@ def CalculateXY(
     
 
     if is_save:
-        Save({"X": X, "Y": Y},file_name)
+        Save({"X": X, "Y": Y},filename)
 
     return X, Y
 
@@ -744,6 +779,7 @@ def PlotXY(
     font_sz=16,
     line_w=2,
     style="line",
+    filename=None,
     is_save=False,
     y_normalization=1,
     x_normalization=1,
@@ -753,28 +789,34 @@ def PlotXY(
     is_multiproc=False,
     is_show=True,
     figsize=(8,8),
+    is_save_picture=False,
     *arg,
     **kwargs
 ):
 
+    if filename==None:
+        filename=title
     if IsFunction(get_y_list):
         if base_num <= 1:
             base_num = 2
+
+        
+
         X, Y = CalculateXY(
             x_list,
             get_y_list,
-            base_num,
-            is_save,
-            title,
-            f_param,
-            is_one_by_one,
-            is_multiproc,
+            base_num=base_num,
+            is_save=is_save,
+            filename=filename,
+            f_param=f_param,
+            is_one_by_one=is_one_by_one,
+            is_multiproc=is_multiproc,
         )
         X=NormalizeArray(np.array(X),x_normalization)
         Y=NormalizeArray(np.array(Y),y_normalization)
     else:
         if is_save:
-            Save({"X": x_list, "Y": get_y_list},title)
+            Save({"X": x_list, "Y": get_y_list},filename=filename)
         X=NormalizeArray(np.array(x_list),x_normalization)
         Y=NormalizeArray(np.array(get_y_list),y_normalization)
     
@@ -809,6 +851,10 @@ def PlotXY(
         ax.legend(handles, labels)
     if is_show == True:
         plt.show()
+    else:
+        if is_save_picture:
+            Save(filename=filename,dpi=200,postfix="png")
+
     return ax
 
 def ReplaceYParam(y):
@@ -844,8 +890,8 @@ def PlotMultiLines(
     f_param={},
     is_one_by_one=False,
     is_save=False,
+    filename=None,
     is_show=True,
-    is_multiproc=False,
     **kwargs
 ):
     if base_num_y!=0:
@@ -855,6 +901,9 @@ def PlotMultiLines(
         base_num_y = y_list
     Z_list=[]
     ax = axes
+
+    if filename==None:
+        filename=title
     
     offset=0
     for i,y in enumerate(Y):
@@ -863,7 +912,7 @@ def PlotMultiLines(
         
         if IsFunction(get_z_list):
             X,Z=CalculateXY(x_list,get_z_list,base_num=base_num_x,is_save=False,
-                            f_param=f_param,is_one_by_one=is_one_by_one)
+                            f_param=f_param,is_one_by_one=is_one_by_one,filename=filename)
 
             Z_list.append(Z)
             X=NormalizeArray(np.array(X),x_normalization)
@@ -882,16 +931,16 @@ def PlotMultiLines(
         if z_normalization==0:
             Z+=offset
             ax = PlotXY(X,Z,base_num=0,xlabel=xlabel,ylabel=zlabel,title=title,xlim=xlim,ylim=(0-0.1,(base_num_y+1)*shift+0.1),
-            label_sz=label_sz,axes=ax,is_save=is_save,is_show=False,style=style,xticks_num=xticks_num,yticks_num=yticks_num,legend=legend_y)
+            label_sz=label_sz,axes=ax,is_save=is_save,filename=filename,is_show=False,style=style,xticks_num=xticks_num,yticks_num=yticks_num,legend=legend_y)
             offset+=shift
         else:
             ax = PlotXY(X,Z/z_normalization,base_num=0,xlabel=xlabel,ylabel=zlabel,title=title,xlim=xlim,ylim=zlim,
-            label_sz=label_sz,axes=ax,is_save=is_save,is_show=False,style=style,xticks_num=xticks_num,yticks_num=yticks_num,legend=legend_y)
+            label_sz=label_sz,axes=ax,is_save=is_save,filename=filename,is_show=False,style=style,xticks_num=xticks_num,yticks_num=yticks_num,legend=legend_y)
 
         
 
     if is_save:
-        Save({"X":X,"Y":Y,"Z_list":Z_list},title)
+        Save({"X":X,"Y":Y,"Z_list":Z_list},filename=filename)
     
     if is_show:
         handles, labels = ax.get_legend_handles_labels()
@@ -919,7 +968,7 @@ def XYFigPlot(ax, style, X, Y, *arg, **kwargs):
     if len(line_list)!=0:
         line_str=line_list[0]
         color=extract_color(line_str,["dash","line"])
-        if re.match(r"dash",line_str)!=None:
+        if re.match(r".*dash.*",line_str)!=None:
             ax.plot(X, Y, c=color, linestyle="--", *arg, **kwargs)
         else:
             ax.plot(X, Y, c=color, *arg, **kwargs)
@@ -975,7 +1024,7 @@ def Calculate3D(
     GetZList,
     base_num=100,
     is_save=False,
-    file_name="Z-XY",
+    filename="Z-XY",
     is_multiproc=False
 ):
 
@@ -998,7 +1047,7 @@ def Calculate3D(
     Z = Z.reshape(base_num, base_num)
 
     if is_save:
-        Save({"X": X, "Y": Y, "Z_list": Z},file_name)
+        Save({"X": X, "Y": Y, "Z_list": Z},filename=filename)
 
     return Z, X, Y
 
@@ -1019,7 +1068,7 @@ def Plot3D(
     label_sz=17,
     style="pcolor",
     is_save=False,
-    model="",
+    filename=None,
     x_normalization=1,
     y_normalization=1,
     z_normalization=1,
@@ -1036,6 +1085,9 @@ def Plot3D(
     plot 3D picture of z vs x-y
     """
 
+    if filename==None:
+        filename=title
+
     if IsFunction(get_z_list):
         if base_num <= 1:
             base_num = 2
@@ -1045,7 +1097,7 @@ def Plot3D(
             get_z_list,
             base_num,
             is_save=is_save,
-            file_name=model,
+            filename=filename,
             is_multiproc=is_multiproc
         )
 
@@ -1054,7 +1106,7 @@ def Plot3D(
         Z=NormalizeArray(np.array(Z),z_normalization)
     else:
         if is_save:
-            Save({"X":x_list,"Y":y_list,"Z":get_z_list},model)
+            Save({"X":x_list,"Y":y_list,"Z":get_z_list},filename=filename)
         X=NormalizeArray(np.array(x_list),x_normalization)
         Y=NormalizeArray(np.array(y_list),y_normalization)
         Z=NormalizeArray(np.array(get_z_list),z_normalization)
@@ -1130,7 +1182,7 @@ def Plot3D(
     if is_show:
         plt.show()
     if is_save:
-        SavePDF(fig,title.replace(os.sep, "_"))
+        SavePDF(fig,filename=filename)
     return ax
 
 
