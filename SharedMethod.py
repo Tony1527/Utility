@@ -114,8 +114,8 @@ def ZPlot(
     f_param=dict(),
     plx=100,
     is_log=False,
-    x_normalization=1,
-    y_normalization=1,
+    x_normalization=1.0,
+    y_normalization=1.0,
     z_normalization=1,
     is_show=True,
     xlabel=r"$Re$",
@@ -264,6 +264,12 @@ def Save(data=None,filename=None,dir_path = _default_output_dir,postfix="pickle"
             # pdf.savefig(figure, bbox_inches="tight")    
     elif postfix=="svg":
         plt.savefig(path, format="eps", dpi=200,*arg,**kwarg)
+    elif postfix == "csv":
+        data.to_csv(path,*arg,**kwarg)
+    elif postfix in ["xls", "xlsx", "xlsm", "xlsb", "odf", "ods", "odt"]:
+        writer = pd.ExcelWriter(path)
+        data.to_excel(writer,*arg,**kwarg)
+        writer.close()
 
 
 
@@ -781,8 +787,8 @@ def PlotXY(
     style="line",
     filename=None,
     is_save=False,
-    y_normalization=1,
-    x_normalization=1,
+    y_normalization=1.0,
+    x_normalization=1.0,
     axes=None,
     f_param={},
     is_one_by_one=False,
@@ -872,8 +878,8 @@ def PlotMultiLines(
     get_z_list,
     base_num_x=100,
     base_num_y=100,
-    x_normalization=1,
-    y_normalization=1,
+    x_normalization=1.0,
+    y_normalization=1.0,
     z_normalization=0,
     shift=1,
     xlabel="${x}$",
@@ -1069,8 +1075,8 @@ def Plot3D(
     style="pcolor",
     is_save=False,
     filename=None,
-    x_normalization=1,
-    y_normalization=1,
+    x_normalization=1.0,
+    y_normalization=1.0,
     z_normalization=1,
     axes=None,
     is_show=True,
